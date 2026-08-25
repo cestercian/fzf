@@ -29,6 +29,12 @@ func replacePlaceholderTest(template string, stripAnsi bool, delimiter Delimiter
 }
 
 func TestReplacePlaceholder(t *testing.T) {
+	if util.IsWindows() {
+		// windowsStyle below is cmd quoting. Empty SHELL defaults to cmd;
+		// Git Bash sets SHELL=bash and would otherwise use POSIX quoting (#4900).
+		t.Setenv("SHELL", "cmd")
+	}
+
 	item1 := newItem("  foo'bar \x1b[31mbaz\x1b[m")
 	items1 := [3][]*Item{{item1}, {item1}, nil}
 	items2 := [3][]*Item{
@@ -248,20 +254,22 @@ func TestReplacePlaceholder(t *testing.T) {
 
 		checkFormat(wantOutput)
 	}
+
+	if util.IsWindows() {
+		t.Run("bash", func(t *testing.T) {
+			t.Setenv("SHELL", "bash")
+			got := replacePlaceholderTest("echo {-2..-1}", stripAnsi, Delimiter{}, printsep, forcePlus, query, items3)
+			if got != "echo '1e 1f'" {
+				t.Errorf("expected: echo '1e 1f', actual: %s", got)
+			}
+		})
+	}
 }
 
 func TestQuoteEntry(t *testing.T) {
 	type quotes struct{ E, O, SQ, DQ, BS, PB string } // standalone escape, outer, single and double quotes, doubled and plain backslash
 	unixStyle := quotes{``, `'`, `'\''`, `"`, `\`, `\`}
 	windowsStyle := quotes{`^`, `^"`, `'`, `\^"`, `\\`, `\`}
-	var effectiveStyle quotes
-	exec := util.NewExecutor("")
-
-	if util.IsWindows() {
-		effectiveStyle = windowsStyle
-	} else {
-		effectiveStyle = unixStyle
-	}
 
 	tests := map[string]string{
 		`'`:     `{{.O}}{{.SQ}}{{.O}}`,
@@ -289,13 +297,30 @@ func TestQuoteEntry(t *testing.T) {
 		`"C:\Program Files"`:      `{{.O}}{{.DQ}}C:{{.PB}}Program Files{{.DQ}}{{.O}}`,
 	}
 
-	for input, expected := range tests {
-		escaped := exec.QuoteEntry(input)
-		expected = templateToString(expected, effectiveStyle)
-		if escaped != expected {
-			t.Errorf("Input: %s, expected: %s, actual %s", input, expected, escaped)
+	assertQuoted := func(t *testing.T, style quotes) {
+		t.Helper()
+		exec := util.NewExecutor("")
+		for input, expectedFmt := range tests {
+			escaped := exec.QuoteEntry(input)
+			expected := templateToString(expectedFmt, style)
+			if escaped != expected {
+				t.Errorf("Input: %s, expected: %s, actual %s", input, expected, escaped)
+			}
 		}
 	}
+
+	if util.IsWindows() {
+		// windowsStyle is cmd quoting. Empty SHELL defaults to cmd; Git Bash
+		// sets SHELL=bash and would otherwise use POSIX quoting (#4900).
+		t.Setenv("SHELL", "cmd")
+		assertQuoted(t, windowsStyle)
+		t.Run("bash", func(t *testing.T) {
+			t.Setenv("SHELL", "bash")
+			assertQuoted(t, unixStyle)
+		})
+		return
+	}
+	assertQuoted(t, unixStyle)
 }
 
 // purpose of this test is to demonstrate some shortcomings of fzf's templating system on Unix
