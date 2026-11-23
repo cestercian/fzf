@@ -170,9 +170,6 @@ module TestShell
   end
 
   def test_ctrl_r_multiline
-    # NOTE: Current bash implementation shows an extra new line if there's
-    # only entry in the history
-    tmux.send_keys ':', :Enter
     tmux.send_keys 'echo "foo', :Enter, 'bar"', :Enter
     tmux.until { |lines| assert_equal %w[foo bar], lines[-2..] }
     tmux.prepare
@@ -920,6 +917,22 @@ class TestBash < TestBase
     tmux.send_keys :Enter
     tmux.until { |lines| assert_equal 'echo to-keep', lines[-1] }
     tmux.send_keys 'C-c'
+  end
+
+  def test_ctrl_r_oldest_entry_deduplicated
+    # The oldest entry is the last record of `fc -lnr` and has no trailing tab
+    tmux.prepare
+    tmux.send_keys 'echo dup', :Enter
+    tmux.prepare
+    tmux.send_keys 'echo other', :Enter
+    tmux.prepare
+    tmux.send_keys 'echo dup', :Enter
+    tmux.prepare
+    tmux.send_keys 'C-r'
+    tmux.until { |lines| assert_operator lines.match_count, :>, 0 }
+    tmux.send_keys 'echo dup'
+    tmux.until { |lines| assert_equal 1, lines.match_count }
+    tmux.send_keys :Escape
   end
 
   def test_dynamic_completion_loader
